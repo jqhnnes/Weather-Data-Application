@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     default_location: str = "Berlin,DE"  # Not used - locations are user-specific
     
     # JWT Settings
-    secret_key: str = "your-secret-key-change-in-production"  # Should be in .env
+    secret_key: str = "" 
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
