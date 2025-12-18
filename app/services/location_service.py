@@ -1,9 +1,9 @@
 """Location service - Business logic for locations."""
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 from app.crud import location as location_crud
 from app.crud import weather_reading as weather_crud
-from app.schemas.location import LocationCreate, LocationResponse
+from app.schemas.location import LocationCreate, LocationResponse, LocationUpdate
 from app.schemas.weather import WeatherReadingCreate
 from app.clients.openweather import get_current_weather, OpenMeteoClient
 from datetime import datetime
@@ -121,3 +121,127 @@ def get_location_with_latest_weather(
         result["latest_weather"] = WeatherReadingResponse.model_validate(latest_weather)
     
     return result
+
+
+def get_all_locations(
+    db: Session,
+    user_id: int,
+    skip: int = 0,
+    limit: int = 100
+) -> List[LocationResponse]:
+    """
+    Get all locations for a specific user with pagination.
+    
+    Args:
+        db: Database session
+        user_id: ID of the user
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+    
+    Returns:
+        List of LocationResponse
+    """
+    locations = location_crud.get_all_locations(db, user_id, skip=skip, limit=limit)
+    return [LocationResponse.model_validate(loc) for loc in locations]
+
+
+def get_location(
+    db: Session,
+    location_id: int,
+    user_id: int
+) -> LocationResponse:
+    """
+    Get a specific location by ID, ensuring it belongs to the user.
+    
+    Args:
+        db: Database session
+        location_id: ID of the location
+        user_id: ID of the user
+    
+    Returns:
+        LocationResponse
+    
+    Raises:
+        ValueError: If location not found
+    """
+    location = location_crud.get_location(db, location_id, user_id)
+    if not location:
+        raise ValueError(f"Location with id {location_id} not found")
+    return LocationResponse.model_validate(location)
+
+
+def check_location_name(
+    db: Session,
+    name: str,
+    user_id: int
+) -> dict:
+    """
+    Check if a location with given name already exists for the user (case-insensitive).
+    
+    Args:
+        db: Database session
+        name: Location name to check
+        user_id: ID of the user
+    
+    Returns:
+        Dictionary with "exists" (bool) and "location" (LocationResponse or None)
+    """
+    existing = location_crud.get_location_by_name(db, name, user_id, case_sensitive=False)
+    if existing:
+        return {
+            "exists": True,
+            "location": LocationResponse.model_validate(existing)
+        }
+    return {"exists": False, "location": None}
+
+
+def update_location(
+    db: Session,
+    location_id: int,
+    location_update: LocationUpdate,
+    user_id: int
+) -> LocationResponse:
+    """
+    Update a location, ensuring it belongs to the user.
+    
+    Args:
+        db: Database session
+        location_id: ID of the location
+        location_update: Update data
+        user_id: ID of the user
+    
+    Returns:
+        LocationResponse
+    
+    Raises:
+        ValueError: If location not found
+    """
+    updated_location = location_crud.update_location(db, location_id, location_update, user_id)
+    if not updated_location:
+        raise ValueError(f"Location with id {location_id} not found")
+    return LocationResponse.model_validate(updated_location)
+
+
+def delete_location(
+    db: Session,
+    location_id: int,
+    user_id: int
+) -> bool:
+    """
+    Delete a location and all its weather readings, ensuring it belongs to the user.
+    
+    Args:
+        db: Database session
+        location_id: ID of the location
+        user_id: ID of the user
+    
+    Returns:
+        True if deletion was successful
+    
+    Raises:
+        ValueError: If location not found
+    """
+    success = location_crud.delete_location(db, location_id, user_id)
+    if not success:
+        raise ValueError(f"Location with id {location_id} not found")
+    return True

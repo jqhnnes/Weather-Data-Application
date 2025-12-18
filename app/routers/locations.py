@@ -6,7 +6,6 @@ from app.database import get_db
 from app.schemas.location import LocationCreate, LocationResponse, LocationListResponse, LocationUpdate
 from app.schemas.weather import WeatherReadingResponse
 from app.services import location_service
-from app.crud import location as location_crud
 from app.tasks.weather_poller import add_location_job, remove_location_job
 from app.auth import get_current_active_user
 from app.models.user import User
@@ -50,8 +49,8 @@ def get_all_locations(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get all locations for the current user with pagination."""
-    locations = location_crud.get_all_locations(db, current_user.id, skip=skip, limit=limit)
-    return LocationListResponse(locations=[LocationResponse.model_validate(loc) for loc in locations])
+    locations = location_service.get_all_locations(db, current_user.id, skip=skip, limit=limit)
+    return LocationListResponse(locations=locations)
 
 
 @router.get("/check-name")
@@ -66,13 +65,7 @@ def check_name(
     Returns:
         {"exists": bool, "location": LocationResponse or None}
     """
-    existing = location_crud.get_location_by_name(db, name, current_user.id, case_sensitive=False)
-    if existing:
-        return {
-            "exists": True,
-            "location": LocationResponse.model_validate(existing)
-        }
-    return {"exists": False, "location": None}
+    return location_service.check_location_name(db, name, current_user.id)
 
 
 @router.get("/{location_id}", response_model=LocationResponse)
@@ -82,10 +75,10 @@ def get_location(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get a specific location by ID, ensuring it belongs to the current user."""
-    location = location_crud.get_location(db, location_id, current_user.id)
-    if not location:
-        raise HTTPException(status_code=404, detail=f"Location with id {location_id} not found")
-    return LocationResponse.model_validate(location)
+    try:
+        return location_service.get_location(db, location_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/{location_id}/with-weather")
@@ -109,15 +102,16 @@ def update_location(
     current_user: User = Depends(get_current_active_user)
 ):
     """Update a location (name, coordinates, or polling interval), ensuring it belongs to the current user."""
-    updated_location = location_crud.update_location(db, location_id, location_update, current_user.id)
-    if not updated_location:
-        raise HTTPException(status_code=404, detail=f"Location with id {location_id} not found")
-    
-    # Update scheduled job if polling interval changed
-    if location_update.poll_interval_minutes is not None:
-        add_location_job(location_id, updated_location.poll_interval_minutes)
-    
-    return LocationResponse.model_validate(updated_location)
+    try:
+        updated_location = location_service.update_location(db, location_id, location_update, current_user.id)
+        
+        # Update scheduled job if polling interval changed
+        if location_update.poll_interval_minutes is not None:
+            add_location_job(location_id, updated_location.poll_interval_minutes)
+        
+        return updated_location
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.delete("/{location_id}", status_code=204)
@@ -134,17 +128,14 @@ def delete_location(
     - If deletion fails: nothing is deleted (automatic rollback)
     """
     try:
-        success = location_crud.delete_location(db, location_id, current_user.id)
-        if not success:
-            raise HTTPException(status_code=404, detail=f"Location with id {location_id} not found")
+        location_service.delete_location(db, location_id, current_user.id)
         
         # Only remove scheduled job if database deletion was successful
         remove_location_job(location_id)
         
         return None
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 404)
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         # Handle any other database errors
         db.rollback()  # Ensure rollback (though CRUD already does this)
