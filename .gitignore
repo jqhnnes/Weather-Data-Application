@@ -25,3 +25,5 @@ venv/
 # SQLite databases (if you switch to SQLite)
 *.db
 
+.vite
+
